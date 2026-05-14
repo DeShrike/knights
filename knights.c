@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <limits.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,10 +9,11 @@
 #include "utils.h"
 #include "image.h"
 
-#define MAXMOVES  8
-#define WIDTH     32
-#define HEIGHT    32
-#define KNIGHTS   1
+#define MAXPLAYERS   20
+#define MAXMOVES     8
+
+#define MIN_SIZE 16
+#define MAX_SIZE 2048
 
 #define LIME    0xFFA4C400
 #define GREEN   0xFF60A917
@@ -41,14 +43,18 @@ uint32_t colors[] = {
 
 #define COLOR_COUNT (sizeof(colors) / sizeof(colors[0]))
 
+uint16_t width, height;
+
 typedef struct {
    uint16_t x;
    uint16_t y;
-   uint32_t pos;
-} Coords;
+} Coord;
 
-Coords* coord_to_pos = NULL;
-Coords* pos_to_coord = NULL;
+// used as a 2D grid. Contains the spiral number.
+int32_t* coord_to_pos = NULL;
+
+// a 1D array, indexed by spiral number, contains the grid coords for that spiral number.
+Coord* pos_to_coord = NULL;
 
 typedef struct {
    const char* name;
@@ -108,31 +114,84 @@ Player contestants[] = {
    },
 };
 
+#define CONTESTANT_COUNT (sizeof(contestants) / sizeof(contestants[0]))
+
+
+// TODO: Vulture, Mantis, Sipius, Xoch
+
 /////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////
 
-// Define the contestants here. These are indices in the contestants[] array.
-uint8_t players[] = { 0 };    // 1 knight
-//uint8_t players[] = { 0, 0 };    // 2 knights
-//uint8_t players[] = { 0, 1, 0 };    // a knight, a leaper and another knight
-
-#define PLAYER_COUNT (sizeof(players) / sizeof(players[0]))
+uint8_t players[MAXPLAYERS] = { 0 };
+uint8_t player_count = 0;
 
 /////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////
+
+int8_t dx[] = { 1,  0, -1, 0}; 
+int8_t dy[] = { 0, -1,  0, 1}; 
+
+#define GIX(x,y) (((y) * width) + (x))
+
+int32_t pos_from_coord(int16_t x, int16_t y)
+{
+   if (x < 0 || x >= width || y < 0 || y >= height)
+   {
+      return INT_MIN;
+   }
+
+   return coord_to_pos[GIX(x, y)];
+}
 
 void calculate_indices()
 {
-   coord_to_pos = malloc(sizeof(Coords) * WIDTH * HEIGHT);
-   pos_to_coord = malloc(sizeof(Coords) * WIDTH * HEIGHT);
+   coord_to_pos = malloc(sizeof(int32_t) * width * height);
+   pos_to_coord = malloc(sizeof(Coord) * width * height);
 
-   uint16_t x, y;
-   x = WIDTH / 2;
-   y = HEIGHT / 2;
-   for (int i = 0; i < WIDTH * HEIGHT; i++)
+   for (int x = 0; x < width; x++)
    {
-      
+      for (int y = 0; y < height; y++)
+      {
+         coord_to_pos[GIX(x, y)] = INT_MAX;
+      }
+   }
+
+   for (int i = 0; i < width * height; i++)
+   {
+      pos_to_coord[i].x = 0;
+      pos_to_coord[i].y = 0;
+   }
+
+   int32_t n = 0;
+   uint8_t dir = 3;
+   uint8_t ndir = (dir + 1) % 4;
+   int16_t x, y;
+   x = width / 2 - 1;
+   y = height / 2;
+   while (n < width * height)
+   {
+      coord_to_pos[GIX(x, y)] = n;
+      pos_to_coord[n].x = x;
+      pos_to_coord[n].y = y;
+
+      int32_t npos = pos_from_coord( x + dx[ndir], y + dy[ndir] );
+      if (npos == INT_MIN)
+      {
+         printf("ERROR: INT_MIN n:%d x:%d y:%d \n", n, x, y);
+      }
+
+      bool canturn = n >= 0 && npos == INT_MAX;
+      if (canturn)
+      {
+         dir = ndir;
+         ndir = (dir + 1) % 4;
+      }
+
+      x += dx[dir];
+      y += dy[dir];
+
+      n++;      
    }
 }
 
@@ -152,12 +211,12 @@ void free_indices()
 bool save_image(const char* filename)
 {
    printf("Saving %s\n", filename);
-   Image out_image = alloc_image(WIDTH, HEIGHT);
+   Image out_image = alloc_image(width, height);
 
    uint8_t r, g, b;
-   for (int y = 0; y < HEIGHT; ++y)
+   for (int y = 0; y < height; ++y)
    {
-      for (int x = 0; x < WIDTH; ++x)
+      for (int x = 0; x < width; ++x)
       {
          r = x % 256;
          g = y % 256;
@@ -171,6 +230,105 @@ bool save_image(const char* filename)
    return true;
 }
 
+bool parse_size(const char* str)
+{
+   width = atoi(str);
+   if (width == 0 || width < MIN_SIZE || width > MAX_SIZE)
+   {
+      fprintf(stderr, "ERROR: Size is out of range.\n");
+      return false;
+   }
+
+   if (width % 2 != 0)
+   {
+      fprintf(stderr, "ERROR: Size must be even.\n");
+      return false;
+   }
+
+   height = width;
+
+   return true;
+}
+
+bool check_filename(const char* filename)
+{
+   int l = strlen(filename);
+   const char* ext = filename + l - 4;
+   if (strcmp(ext, ".png") != 0 && strcmp(ext, ".PNG") != 0)
+   {
+      fprintf(stderr, "ERROR: Filename must end in .png\n");
+      return false;
+   }
+
+   return true;
+}
+
+bool parse_players(const char *str)
+{
+   player_count = 0;
+   char temp[1000];
+   strncpy(temp, str, 1000);
+   temp[1000 - 1] = '\0';
+   int l = strlen(temp);
+   char* p = temp;
+   char* n = p;
+   bool done = false;
+   while (true)
+   {
+      while (*n != '-' && *n != 0)
+      {
+         n++;
+      }
+
+      if (*n == 0)
+      {
+         done = true;
+      }
+      
+      *n = 0;
+      bool foundc = false;
+      for (int c = 0; c < CONTESTANT_COUNT; c++)
+      {
+         if (strcmp(p, contestants[c].name) == 0)
+         {
+            printf("Player %d = %s\n", player_count, p);
+            players[player_count++] = c;
+            foundc = true;
+         }
+      }
+
+      if (!foundc)
+      {
+         fprintf(stderr, "ERROR: Unknown player %s\n", p);
+         return false; 
+      }
+
+      p = n + 1;
+      n = p;
+
+      if (done)
+      {
+         break;
+      }
+   }
+
+   return true;
+}
+
+void usage(const char* program)
+{
+   fprintf(stderr, "Usage: %s <players> <size> <filename>\n", program);
+   fprintf(stderr, " <players>: a list of players, seperated by a dash.\n");
+   fprintf(stderr, "            Maximum = %d\n", MAXPLAYERS);
+   fprintf(stderr, "    <size>: The square size of the image to generated, between %d and %d\n", MIN_SIZE, MAX_SIZE);
+   fprintf(stderr, "            Must be even.\n");
+   fprintf(stderr, "<filename>: The name of the PNG file to save.\n");
+   fprintf(stderr, "\n");
+   fprintf(stderr, "Examples: %s Knight-Zebra-Leaper 256 out.png\n", program);
+   fprintf(stderr, "          %s Ferz-Wazir-Dabbaba-Antilope 1024 out.png\n", program);
+   fprintf(stderr, "          %s Knight-Alfil-Knight 2048 out.png\n", program);
+}
+
 int main(int argc, char **argv)
 {
    srand(time(NULL));
@@ -179,20 +337,76 @@ int main(int argc, char **argv)
 
    if (argc <= 0)
    {
-      fprintf(stderr, "Usage: %s <input.png>\n", program);
-      fprintf(stderr, "ERROR: no outpu file is provided\n");
+      usage(program);
+      return 1;
+   }
+
+   const char *player_list = args_shift(&argc, &argv);
+
+   if (!parse_players(player_list))
+   {
+      usage(program);
+      return 1;
+   }
+
+   if (argc <= 0)
+   {
+      usage(program);
+      return 1;
+   }
+
+   const char *size_str = args_shift(&argc, &argv);
+
+   if (argc <= 0)
+   {
+      usage(program);
+      return 1;
+   }
+
+   if (!parse_size(size_str))
+   {
+      usage(program);
       return 1;
    }
 
    const char *output_file = args_shift(&argc, &argv);
 
+   if (!check_filename(output_file))
+   {
+      usage(program);
+      return 1;
+   }
+
    calculate_indices();
 
+   /*
+   for (int y = 0; y < height; y++)
+   {
+      for (int x = 0; x < width; x++)
+      {
+         printf("%3d ", pos_from_coord(x, y));
+      }
+
+      printf("\n");
+   }
+
+   printf("----------------\n");
+
+   for (int i = 0; i < width * height; i++)
+   {
+      printf("%d = (%d, %d) ", i, pos_to_coord[i].x, pos_to_coord[i].y);
+   }
+
+   printf("----------------\n");
+   */
+
+   /*
    if (!save_image(output_file))
    {
       fprintf(stderr, "Could not save image %s.\n", output_file);
       return 1;
    }
+   */
 
    free_indices();
 
