@@ -35,7 +35,7 @@ Knight, Leaper, Alfil, Antilope, Dabbaba, Wazir, Zebra and Ferz.
 Examples:
 
 - Knight-Knight
-- Knight-Alvil-Wazir-Knight
+- Knight-Alfil-Wazir-Knight
 - Wazir-Ferz-Alfil-Alfil
 - Dabbaba
 
@@ -46,3 +46,15 @@ The second parameter is the size of the output image.
 256 = 256 x 256 pixels.
 
 Should be an even number not greater than 2048.
+
+## To try
+
+Examples from the Numberphile video:
+
+
+
+This one is different from the image shown in the video. I think they did something wrong.
+
+```console
+./knights Knight-Dabbaba-Wazir-Wazir 2048 out2.png
+```

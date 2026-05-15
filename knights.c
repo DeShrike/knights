@@ -51,16 +51,18 @@ typedef struct {
    uint16_t y;
 } Coord;
 
-// used as a 2D grid. Contains the index of the placed player, or -1
+// Used as a 2D grid. Contains the index of the placed player, or -1
 int8_t* results = NULL;
 
-// used as a 2D grid. Contains a bitmask. A 1-bit means that the player with that bit-index guards that spot.
+// Used as a 2D grid. Contains a bitmask. 
+// A 1-bit means that the player with that bit-index guards that spot.
 uint32_t* guarding = NULL;
 
-// used as a 2D grid. Contains the spiral number.
+// Used as a 2D grid. Contains the spiral number.
 int32_t* coord_to_pos = NULL;
 
-// a 1D array, indexed by spiral number, contains the grid coords for that spiral number.
+// A 1D array, indexed by spiral number. 
+// Contains the grid coords for that spiral number.
 Coord* pos_to_coord = NULL;
 
 typedef struct {
@@ -123,8 +125,7 @@ Player contestants[] = {
 
 #define CONTESTANT_COUNT (sizeof(contestants) / sizeof(contestants[0]))
 
-
-// TODO: Vulture, Mantis, Sipius, Xoch
+// TODO: Mantis, Sipius, Xoch
 
 /////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////
@@ -339,38 +340,22 @@ bool parse_players(const char *str)
    return true;
 }
 
-//////////////////////////////////////////////////////////////////////////
-
 bool can_place(uint8_t player, uint32_t position)
 {
-   // printf("can_place(%d, %d)\n", player, position);
-
-
-   //TODO: wrong
-   //moet check of alle andere players de position bewaken
-
    uint16_t x, y;
    x = pos_to_coord[position].x;
    y = pos_to_coord[position].y;
 
-   if ((guarding[IX(x, y)] & ~(1 << player)) != 0)
+   // is this position free ?
+   if (results[IX(x, y)] != NO_PLAYER)
    {
       return false;
    }
 
-   uint8_t contestant = players[player];
-
-   for (int m = 0; m < contestants[contestant].moves; m++)
+   // is it guarded by another player ?
+   if ((guarding[IX(x, y)] & ~(1 << player)) != 0)
    {
-      uint16_t gx = x + contestants[contestant].move_x[m];
-      uint16_t gy = y + contestants[contestant].move_y[m];
-      if (gx >= 0 && gx < width && gy >= 0 && gy < height)
-      {
-         if ((guarding[IX(gx, gy)] & ~(1 << player)) != 0)
-         {
-            return false;
-         }
-      }
+      return false;
    }
 
    return true;
@@ -378,8 +363,6 @@ bool can_place(uint8_t player, uint32_t position)
 
 void place(uint8_t player, uint32_t position)
 {
-   // printf("place(%d, %d)\n", player, position);
-
    uint16_t x, y;
    x = pos_to_coord[position].x;
    y = pos_to_coord[position].y;
@@ -392,10 +375,11 @@ void place(uint8_t player, uint32_t position)
 
    uint8_t contestant = players[player];
 
+   int16_t gx, gy;
    for (int m = 0; m < contestants[contestant].moves; m++)
    {
-      uint16_t gx = x + contestants[contestant].move_x[m];
-      uint16_t gy = y + contestants[contestant].move_y[m];
+      gx = (int16_t)x + (int16_t)contestants[contestant].move_x[m];
+      gy = (int16_t)y + (int16_t)contestants[contestant].move_y[m];
       if (gx >= 0 && gx < width && gy >= 0 && gy < height)
       {
          guarding[IX(gx, gy)] |= (1 << player);
