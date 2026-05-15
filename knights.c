@@ -12,8 +12,9 @@
 #define MAXPLAYERS   20
 #define MAXMOVES     8
 
-#define MIN_SIZE 16
-#define MAX_SIZE 2048
+#define MIN_SIZE     16
+#define MAX_SIZE     2048
+#define NO_PLAYER    -1
 
 #define LIME    0xFFA4C400
 #define GREEN   0xFF60A917
@@ -37,8 +38,8 @@
 #define TAUPE   0xFF87794E
 
 uint32_t colors[] = {
-   LIME, GREEN, EMERALD, TEAL, CYAN, COBALT, INDIGO, VIOLET, PINK, MAGENTA,
-   CRIMSON, RED, ORANGE, AMBER, YELLOW, BROWN, OLIVE, STEEL, MAUVE, TAUPE
+   RED, YELLOW, GREEN, EMERALD, TEAL, CYAN, COBALT, INDIGO, VIOLET, PINK, MAGENTA,
+   CRIMSON, ORANGE, AMBER, BROWN, OLIVE, STEEL, MAUVE, LIME, TAUPE
 };
 
 #define COLOR_COUNT (sizeof(colors) / sizeof(colors[0]))
@@ -49,6 +50,12 @@ typedef struct {
    uint16_t x;
    uint16_t y;
 } Coord;
+
+// used as a 2D grid. Contains the index of the placed player, or -1
+int8_t* results = NULL;
+
+// used as a 2D grid. Contains a bitmask. A 1-bit means that the player with that bit-index guards that spot.
+uint32_t* guarding = NULL;
 
 // used as a 2D grid. Contains the spiral number.
 int32_t* coord_to_pos = NULL;
@@ -132,7 +139,7 @@ uint8_t player_count = 0;
 int8_t dx[] = { 1,  0, -1, 0}; 
 int8_t dy[] = { 0, -1,  0, 1}; 
 
-#define GIX(x,y) (((y) * width) + (x))
+#define IX(x,y) (((y) * width) + (x))
 
 int32_t pos_from_coord(int16_t x, int16_t y)
 {
@@ -141,7 +148,7 @@ int32_t pos_from_coord(int16_t x, int16_t y)
       return INT_MIN;
    }
 
-   return coord_to_pos[GIX(x, y)];
+   return coord_to_pos[IX(x, y)];
 }
 
 void calculate_indices()
@@ -153,7 +160,7 @@ void calculate_indices()
    {
       for (int y = 0; y < height; y++)
       {
-         coord_to_pos[GIX(x, y)] = INT_MAX;
+         coord_to_pos[IX(x, y)] = INT_MAX;
       }
    }
 
@@ -171,7 +178,7 @@ void calculate_indices()
    y = height / 2;
    while (n < width * height)
    {
-      coord_to_pos[GIX(x, y)] = n;
+      coord_to_pos[IX(x, y)] = n;
       pos_to_coord[n].x = x;
       pos_to_coord[n].y = y;
 
@@ -206,6 +213,16 @@ void free_indices()
    {
       free(pos_to_coord);
    }
+
+   if (guarding != NULL)
+   {
+      free(guarding);
+   }
+
+   if (results != NULL)
+   {
+      free(results);
+   }
 }
 
 bool save_image(const char* filename)
@@ -218,10 +235,18 @@ bool save_image(const char* filename)
    {
       for (int x = 0; x < width; ++x)
       {
-         r = x % 256;
-         g = y % 256;
-         b = (x + y) * 256;
-         set_pixel(out_image, x, y, r, g, b);
+         int8_t player = results[IX(x, y)];
+         if (player != NO_PLAYER)
+         {
+            r = (colors[player] & 0xFF0000) >> 16;
+            g = (colors[player] & 0x00FF00) >> 8;
+            b = (colors[player] & 0x0000FF);
+            set_pixel(out_image, x, y, r, g, b);
+         }
+         else
+         {
+            set_pixel(out_image, x, y, 0, 0, 0);
+         }
       }
    }
 
@@ -269,7 +294,6 @@ bool parse_players(const char *str)
    char temp[1000];
    strncpy(temp, str, 1000);
    temp[1000 - 1] = '\0';
-   int l = strlen(temp);
    char* p = temp;
    char* n = p;
    bool done = false;
@@ -291,7 +315,7 @@ bool parse_players(const char *str)
       {
          if (strcmp(p, contestants[c].name) == 0)
          {
-            printf("Player %d = %s\n", player_count, p);
+            // printf("Player %d = %s\n", player_count, p);
             players[player_count++] = c;
             foundc = true;
          }
@@ -313,6 +337,119 @@ bool parse_players(const char *str)
    }
 
    return true;
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+bool can_place(uint8_t player, uint32_t position)
+{
+   // printf("can_place(%d, %d)\n", player, position);
+
+
+   //TODO: wrong
+   //moet check of alle andere players de position bewaken
+
+   uint16_t x, y;
+   x = pos_to_coord[position].x;
+   y = pos_to_coord[position].y;
+
+   if ((guarding[IX(x, y)] & ~(1 << player)) != 0)
+   {
+      return false;
+   }
+
+   uint8_t contestant = players[player];
+
+   for (int m = 0; m < contestants[contestant].moves; m++)
+   {
+      uint16_t gx = x + contestants[contestant].move_x[m];
+      uint16_t gy = y + contestants[contestant].move_y[m];
+      if (gx >= 0 && gx < width && gy >= 0 && gy < height)
+      {
+         if ((guarding[IX(gx, gy)] & ~(1 << player)) != 0)
+         {
+            return false;
+         }
+      }
+   }
+
+   return true;
+}
+
+void place(uint8_t player, uint32_t position)
+{
+   // printf("place(%d, %d)\n", player, position);
+
+   uint16_t x, y;
+   x = pos_to_coord[position].x;
+   y = pos_to_coord[position].y;
+
+   // place the player
+   results[IX(x, y)] = player;
+
+   // mark all places guarded
+   guarding[IX(x, y)] = 0xFFFFFFFF;
+
+   uint8_t contestant = players[player];
+
+   for (int m = 0; m < contestants[contestant].moves; m++)
+   {
+      uint16_t gx = x + contestants[contestant].move_x[m];
+      uint16_t gy = y + contestants[contestant].move_y[m];
+      if (gx >= 0 && gx < width && gy >= 0 && gy < height)
+      {
+         guarding[IX(gx, gy)] |= (1 << player);
+      }
+   }
+}
+
+void play()
+{
+   // all players start at position 0
+   uint32_t positions[MAXPLAYERS] = { 0 };
+
+   guarding = malloc(width * height * sizeof(uint32_t));
+
+   for (int i = 0; i < width * height; i++)
+   {
+      results[i] = NO_PLAYER;
+      guarding[i] = 0;
+   }
+
+   bool placed = true;
+   while (placed)
+   {
+      placed = false;
+      for (uint8_t current_player = 0; current_player < player_count; current_player++)
+      {
+         while (positions[current_player] < width * height && 
+                !can_place(current_player, positions[current_player]))
+         {
+            positions[current_player]++;
+         }
+
+         if (positions[current_player] < width * height)
+         {
+            place(current_player, positions[current_player]);
+            positions[current_player]++;
+            placed = true;
+         }
+      }
+   }
+}
+
+void print_summary(const char* filename)
+{
+   printf("%d x %d = %d\n", width, height, width * height);
+   printf("%s\n", filename);
+   printf("Players: ");
+   for (int p = 0; p < player_count; p++)
+   {
+      if (p > 0) printf(", ");
+      printf("%s", contestants[players[p]].name);
+   }
+
+   printf("\n");
 }
 
 void usage(const char* program)
@@ -378,6 +515,12 @@ int main(int argc, char **argv)
    }
 
    calculate_indices();
+   
+   print_summary(output_file);
+
+   results = malloc(width * height * sizeof(int8_t));
+
+   play();
 
    /*
    for (int y = 0; y < height; y++)
@@ -400,13 +543,11 @@ int main(int argc, char **argv)
    printf("----------------\n");
    */
 
-   /*
    if (!save_image(output_file))
    {
       fprintf(stderr, "Could not save image %s.\n", output_file);
       return 1;
    }
-   */
 
    free_indices();
 
