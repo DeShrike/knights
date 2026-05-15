@@ -9,12 +9,12 @@
 #include "utils.h"
 #include "image.h"
 
-#define MAXPLAYERS   20
-#define MAXMOVES     8
+#define MAXOPPONENTS   20
+#define MAXMOVES     12
 
 #define MIN_SIZE     16
 #define MAX_SIZE     2048
-#define NO_PLAYER    -1
+#define NO_PIECE    -1
 
 #define LIME    0xFFA4C400
 #define GREEN   0xFF60A917
@@ -38,7 +38,7 @@
 #define TAUPE   0xFF87794E
 
 uint32_t colors[] = {
-   RED, YELLOW, GREEN, EMERALD, TEAL, CYAN, COBALT, INDIGO, VIOLET, PINK, MAGENTA,
+   RED, YELLOW, GREEN, COBALT, EMERALD, TEAL, CYAN, INDIGO, VIOLET, PINK, MAGENTA,
    CRIMSON, ORANGE, AMBER, BROWN, OLIVE, STEEL, MAUVE, LIME, TAUPE
 };
 
@@ -51,11 +51,11 @@ typedef struct {
    uint16_t y;
 } Coord;
 
-// Used as a 2D grid. Contains the index of the placed player, or -1
+// Used as a 2D grid. Contains the index of the placed opponent, or -1
 int8_t* results = NULL;
 
 // Used as a 2D grid. Contains a bitmask. 
-// A 1-bit means that the player with that bit-index guards that spot.
+// A 1-bit means that the opponent with that bit-index guards that spot.
 uint32_t* guarding = NULL;
 
 // Used as a 2D grid. Contains the spiral number.
@@ -70,17 +70,17 @@ typedef struct {
    uint8_t moves;
    int8_t move_x[MAXMOVES];
    int8_t move_y[MAXMOVES];
-} Player;
+} Piece;
 
-Player contestants[] = {
+Piece pieces[] = {
    {
-      .name = "Knight",    // 2 - 1
+      .name = "Knight",    // 1 - 2
       .moves = 8,
       .move_x = { -2, -1,  1,  2, 2, 1, -1, -2 },
       .move_y = { -1, -2, -2, -1, 1, 2,  2,  1 },
    },
    {
-      .name = "Leaper",
+      .name = "Dromedary",
       .moves = 4,
       .move_x = { 3, 0, -3,  0 },
       .move_y = { 0, 3,  0, -3 },
@@ -92,7 +92,7 @@ Player contestants[] = {
       .move_y = { -2, -2, 2,  2 },
    },
    {
-      .name = "Antilope",     // 4 - 3
+      .name = "Antilope",     // 3 - 4
       .moves = 8,
       .move_x = { -4, -3,  3,  4, 4, 3, -3, -4 },
       .move_y = { -3, -4, -4, -3, 3, 4,  4,  3 },
@@ -110,7 +110,7 @@ Player contestants[] = {
       .move_y = { 0, 1,  0, -1 },
    },
    {
-      .name = "Zebra",     // 3 - 2
+      .name = "Zebra",     // 2 - 3
       .moves = 8,
       .move_x = { -3, -2,  2,  3, 3, 2, -2, -3 },
       .move_y = { -2, -3, -3, -2, 2, 3,  3,  2 },
@@ -121,21 +121,30 @@ Player contestants[] = {
       .move_x = { -1,  1, 1, -1 },
       .move_y = { -1, -1, 1,  1 },
    },
+   {
+      .name = "Mantis",    // 1 - 3
+      .moves = 8,
+      .move_x = { -1,  1,  3, 3, 1, -1, -3, -3 },
+      .move_y = { -3, -3, -1, 1, 3,  3,  1, -1 },
+   },
+   {
+      .name = "Sipius",    // 2 - 4
+      .moves = 8,
+      .move_x = { -2,  2,  4, 4, 2, -2, -4, -4 },
+      .move_y = { -4, -4, -2, 2, 4,  4,  2, -2 },
+   },
+   {
+      .name = "Xoch",    // 1 - 2 - 3
+      .moves = 12,
+      .move_x = { -2, -4, -2,  2,  4,  2,  2, 4, 2, -2, -4, -2 },
+      .move_y = { -2, -2, -4, -2, -2, -4,  2, 2, 4,  2,  2,  4 },
+   },
 };
 
-#define CONTESTANT_COUNT (sizeof(contestants) / sizeof(contestants[0]))
+#define PIECE_COUNT (sizeof(pieces) / sizeof(pieces[0]))
 
-// TODO: Mantis, Sipius, Xoch
-
-/////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////
-
-uint8_t players[MAXPLAYERS] = { 0 };
-uint8_t player_count = 0;
-
-/////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////
+uint8_t opponents[MAXOPPONENTS] = { 0 };
+uint8_t opponent_count = 0;
 
 int8_t dx[] = { 1,  0, -1, 0}; 
 int8_t dy[] = { 0, -1,  0, 1}; 
@@ -237,7 +246,7 @@ bool save_image(const char* filename)
       for (int x = 0; x < width; ++x)
       {
          int8_t player = results[IX(x, y)];
-         if (player != NO_PLAYER)
+         if (player != NO_PIECE)
          {
             r = (colors[player] & 0xFF0000) >> 16;
             g = (colors[player] & 0x00FF00) >> 8;
@@ -289,9 +298,9 @@ bool check_filename(const char* filename)
    return true;
 }
 
-bool parse_players(const char *str)
+bool parse_opponents(const char *str)
 {
-   player_count = 0;
+   opponent_count = 0;
    char temp[1000];
    strncpy(temp, str, 1000);
    temp[1000 - 1] = '\0';
@@ -312,19 +321,18 @@ bool parse_players(const char *str)
       
       *n = 0;
       bool foundc = false;
-      for (int c = 0; c < CONTESTANT_COUNT; c++)
+      for (int c = 0; c < PIECE_COUNT; c++)
       {
-         if (strcmp(p, contestants[c].name) == 0)
+         if (strcmp(p, pieces[c].name) == 0)
          {
-            // printf("Player %d = %s\n", player_count, p);
-            players[player_count++] = c;
+            opponents[opponent_count++] = c;
             foundc = true;
          }
       }
 
       if (!foundc)
       {
-         fprintf(stderr, "ERROR: Unknown player %s\n", p);
+         fprintf(stderr, "ERROR: Unknown piece: %s\n", p);
          return false; 
       }
 
@@ -340,20 +348,20 @@ bool parse_players(const char *str)
    return true;
 }
 
-bool can_place(uint8_t player, uint32_t position)
+bool can_place(uint8_t opponent, uint32_t position)
 {
    uint16_t x, y;
    x = pos_to_coord[position].x;
    y = pos_to_coord[position].y;
 
    // is this position free ?
-   if (results[IX(x, y)] != NO_PLAYER)
+   if (results[IX(x, y)] != NO_PIECE)
    {
       return false;
    }
 
    // is it guarded by another player ?
-   if ((guarding[IX(x, y)] & ~(1 << player)) != 0)
+   if ((guarding[IX(x, y)] & ~(1 << opponent)) != 0)
    {
       return false;
    }
@@ -361,42 +369,42 @@ bool can_place(uint8_t player, uint32_t position)
    return true;
 }
 
-void place(uint8_t player, uint32_t position)
+void place(uint8_t opponent, uint32_t position)
 {
    uint16_t x, y;
    x = pos_to_coord[position].x;
    y = pos_to_coord[position].y;
 
    // place the player
-   results[IX(x, y)] = player;
+   results[IX(x, y)] = opponent;
 
    // mark all places guarded
    guarding[IX(x, y)] = 0xFFFFFFFF;
 
-   uint8_t contestant = players[player];
+   uint8_t piece = opponents[opponent];
 
    int16_t gx, gy;
-   for (int m = 0; m < contestants[contestant].moves; m++)
+   for (int m = 0; m < pieces[piece].moves; m++)
    {
-      gx = (int16_t)x + (int16_t)contestants[contestant].move_x[m];
-      gy = (int16_t)y + (int16_t)contestants[contestant].move_y[m];
+      gx = (int16_t)x + (int16_t)pieces[piece].move_x[m];
+      gy = (int16_t)y + (int16_t)pieces[piece].move_y[m];
       if (gx >= 0 && gx < width && gy >= 0 && gy < height)
       {
-         guarding[IX(gx, gy)] |= (1 << player);
+         guarding[IX(gx, gy)] |= (1 << opponent);
       }
    }
 }
 
 void play()
 {
-   // all players start at position 0
-   uint32_t positions[MAXPLAYERS] = { 0 };
+   // all opponents start at position 0
+   uint32_t positions[MAXOPPONENTS] = { 0 };
 
    guarding = malloc(width * height * sizeof(uint32_t));
 
    for (int i = 0; i < width * height; i++)
    {
-      results[i] = NO_PLAYER;
+      results[i] = NO_PIECE;
       guarding[i] = 0;
    }
 
@@ -404,18 +412,18 @@ void play()
    while (placed)
    {
       placed = false;
-      for (uint8_t current_player = 0; current_player < player_count; current_player++)
+      for (uint8_t current_opponent = 0; current_opponent < opponent_count; current_opponent++)
       {
-         while (positions[current_player] < width * height && 
-                !can_place(current_player, positions[current_player]))
+         while (positions[current_opponent] < width * height && 
+                !can_place(current_opponent, positions[current_opponent]))
          {
-            positions[current_player]++;
+            positions[current_opponent]++;
          }
 
-         if (positions[current_player] < width * height)
+         if (positions[current_opponent] < width * height)
          {
-            place(current_player, positions[current_player]);
-            positions[current_player]++;
+            place(current_opponent, positions[current_opponent]);
+            positions[current_opponent]++;
             placed = true;
          }
       }
@@ -426,11 +434,11 @@ void print_summary(const char* filename)
 {
    printf("%d x %d = %d\n", width, height, width * height);
    printf("%s\n", filename);
-   printf("Players: ");
-   for (int p = 0; p < player_count; p++)
+   printf("Opponents: ");
+   for (int p = 0; p < opponent_count; p++)
    {
       if (p > 0) printf(", ");
-      printf("%s", contestants[players[p]].name);
+      printf("%s", pieces[opponents[p]].name);
    }
 
    printf("\n");
@@ -438,22 +446,28 @@ void print_summary(const char* filename)
 
 void usage(const char* program)
 {
-   fprintf(stderr, "Usage: %s <players> <size> <filename>\n", program);
-   fprintf(stderr, " <players>: a list of players, seperated by a dash.\n");
-   fprintf(stderr, "            Maximum = %d\n", MAXPLAYERS);
-   fprintf(stderr, "    <size>: The square size of the image to generated, between %d and %d\n", MIN_SIZE, MAX_SIZE);
-   fprintf(stderr, "            Must be even.\n");
-   fprintf(stderr, "<filename>: The name of the PNG file to save.\n");
+   fprintf(stderr, "Usage: %s <opponents> <size> <filename>\n", program);
+   fprintf(stderr, "<opponents>: a list of opponents, seperated by a dash.\n");
+   fprintf(stderr, "             Maximum = %d\n", MAXOPPONENTS);
+   fprintf(stderr, "     <size>: The square size of the image to generated, between %d and %d\n", MIN_SIZE, MAX_SIZE);
+   fprintf(stderr, "             Must be even.\n");
+   fprintf(stderr, " <filename>: The name of the PNG file to save.\n");
    fprintf(stderr, "\n");
-   fprintf(stderr, "Examples: %s Knight-Zebra-Leaper 256 out.png\n", program);
+   fprintf(stderr, "Supported opponents:\n");
+   for (int p = 0; p < PIECE_COUNT; p++)
+   {
+      if (p > 0) fprintf(stderr, ", ");
+      fprintf(stderr, "%s", pieces[p].name);
+   }
+
+   fprintf(stderr, "\n\n");
+   fprintf(stderr, "Examples: %s Knight-Zebra-Dromedary 256 out.png\n", program);
    fprintf(stderr, "          %s Ferz-Wazir-Dabbaba-Antilope 1024 out.png\n", program);
    fprintf(stderr, "          %s Knight-Alfil-Knight 2048 out.png\n", program);
 }
 
 int main(int argc, char **argv)
 {
-   srand(time(NULL));
-
    const char *program = args_shift(&argc, &argv);
 
    if (argc <= 0)
@@ -462,9 +476,9 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   const char *player_list = args_shift(&argc, &argv);
+   const char *opponent_list = args_shift(&argc, &argv);
 
-   if (!parse_players(player_list))
+   if (!parse_opponents(opponent_list))
    {
       usage(program);
       return 1;
@@ -505,27 +519,6 @@ int main(int argc, char **argv)
    results = malloc(width * height * sizeof(int8_t));
 
    play();
-
-   /*
-   for (int y = 0; y < height; y++)
-   {
-      for (int x = 0; x < width; x++)
-      {
-         printf("%3d ", pos_from_coord(x, y));
-      }
-
-      printf("\n");
-   }
-
-   printf("----------------\n");
-
-   for (int i = 0; i < width * height; i++)
-   {
-      printf("%d = (%d, %d) ", i, pos_to_coord[i].x, pos_to_coord[i].y);
-   }
-
-   printf("----------------\n");
-   */
 
    if (!save_image(output_file))
    {
