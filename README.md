@@ -32,7 +32,7 @@ The first parameter defines the opponents.
 
 Possible opponents are:
 
-Knight, Leaper, Alfil, Antilope, Dabbaba, Wazir, Zebra, Ferz, Manis, Sipius, Xoch.
+Knight, Dromedary, Alfil, Antilope, Dabbaba, Wazir, Zebra, Ferz, Manis, Sipius, Xoch.
 
 The maximum opponents is currently 20.
 
