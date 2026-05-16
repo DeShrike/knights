@@ -1,4 +1,4 @@
-# Knight
+# Knights
 
 See Numberphile videos:
 
